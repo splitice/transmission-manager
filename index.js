@@ -7,27 +7,26 @@ const Transmission = require ('transmission-promise'),
 
 const downloadDir = "/mnt/temp/downloads/torrents/"
 const transmission = new Transmission({host: '205.185.127.66'}) //,username: 'username',password: 'password'
+const freeleechMode = true
 
 async function manageTorrents(critical){
     const ret = {}
-    try {
-        const arg = await transmission.get(false, ["id","name","status","files","secondsSeeding","isPrivate","percentDone"]);
-        const torrents = arg.torrents
-        for(let i = 0; i < torrents.length; i++){
-            const torrent = torrents[i]
-            try {
-                await handleTorrent(torrent, critical)
-            }catch(ex){
-                console.error("Unable to handle %s", ex)
-            }
-            for(var f in torrent.files){
-                const topPath = torrent.files[f].name.match(/^([^/]+)/)[1]
-                ret[topPath] = true
-            }
-       }
-    }finally {
-        //setTimeout(doWork, 6000)
+    
+    const arg = await transmission.get(false, ["id","name","status","files","secondsSeeding","isPrivate","percentDone"]);
+    const torrents = arg.torrents
+    for(let i = 0; i < torrents.length; i++){
+        const torrent = torrents[i]
+        try {
+            await handleTorrent(torrent, critical)
+        }catch(ex){
+            console.error("Unable to handle %s", ex)
+        }
+        for(var f in torrent.files){
+            const topPath = torrent.files[f].name.match(/^([^/]+)/)[1]
+            ret[topPath] = true
+        }
     }
+       
     return ret
 }
 
@@ -68,8 +67,10 @@ function findExtra(d, torrentFiles, root = ""){
 }
 
 async function handleTorrent(torrent, critical){
+    const shortTime = torrent.name.indexOf("UHD") == -1 ? 1200 : 432000 /* extra time to make sure processed correctly */
+    
     /* Removal on seeding completion */
-    if(torrent.isPrivate){
+    if(torrent.isPrivate && !freeleechMode){
         if(isSeeding(torrent.status) && torrent.secondsSeeding > 1451520){
             console.log("Removing private torrent %s, seeded enough", torrent.name)
             await transmission.remove([torrent.id], true)
@@ -77,7 +78,7 @@ async function handleTorrent(torrent, critical){
         }
     }else{
         if(isSeeding(torrent.status) && torrent.secondsSeeding > 1200){
-            console.log("Removing public torrent %s, seeded enough", torrent.name)
+            console.log("Removing %s torrent %s, seeded enough", torrent.isPrivate ? 'private':'public',torrent.name)
             await transmission.remove([torrent.id], true)
             return
         }
@@ -103,7 +104,7 @@ async function handleTorrent(torrent, critical){
             await transmission.stop([torrent.id])
         }
     } else if(torrent.status == transmission.status.STOPPED && torrent.percentDone > 0.85) {
-        //await transmission.start([torrent.id])
+        await transmission.start([torrent.id])
     }
 }
 
