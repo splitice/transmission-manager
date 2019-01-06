@@ -2,12 +2,13 @@ const Transmission = require ('transmission-promise'),
       fs = require('fs'),
       fsPromises = fs.promises,
       rdr = require('readdir-recursive-promise'),
-      fsExtra = require('fs-extra')
+      fsExtra = require('fs-extra'),
+      disk = require('diskusage')
 
 const downloadDir = "/mnt/temp/downloads/torrents/"
 const transmission = new Transmission({host: '205.185.127.66'}) //,username: 'username',password: 'password'
 
-async function doWork(){
+async function manageTorrents(){
     try {
         const arg = await transmission.get(false, ["id","name","status","files","secondsSeeding","isPrivate"]);
         const torrents = arg.torrents
@@ -63,7 +64,7 @@ function findExtra(d, torrentFiles, root = ""){
 async function handleTorrent(torrent){
     /* Removal on seeding completion */
     if(torrent.isPrivate){
-        if(isSeeding(torrent.status) && torrent.secondsSeeding > 3628800){
+        if(isSeeding(torrent.status) && torrent.secondsSeeding > 1451520){
             console.log("Removing private torrent %s, seeded enough", torrent.name)
             await transmission.remove([torrent.id], true)
             return
@@ -83,12 +84,37 @@ async function handleTorrent(torrent){
         if(d){
             const extraFiles = findExtra(d, torrent.files, torrent.name + "/")
             for(var i = 0; i < extraFiles.length; i++){
-                const file = extraFiles[i]
+                const file = downloadDir + extraFiles[i]
                 console.log("Removing file %s from %s", file, torrent.name)
-                fsExtra.removeSync(downloadDir + torrent.name + "/" + file)
+                fsExtra.removeSync(file)
             }
         }
     }
 }
 
-doWork()
+async function manageSpeed(){
+    const gb = 1000*1000*1000;
+    const info = await disk.check('/');
+    if(info.available < 4*gb){
+        console.log("Less than 4GB remains (critical)")
+        await transmission.session({"speed-limit-down": 5})
+    } else if(info.available < 6*gb){
+        console.log("Less than 6GB remains (critical)")
+        await transmission.session({"speed-limit-down": 100})
+    } else if(info.available < 10*gb){
+        console.log("Less than 10GB remains (critical)")
+        await transmission.session({"speed-limit-down": 5*1000})
+    }else if(info.available < 20*gb){
+        console.log("Less than 20GB remains (warning)")
+        await transmission.session({"speed-limit-down": 10*1000})
+    }else if(info.available < 30*gb){
+        console.log("Less than 30GB remains (warning)")
+        await transmission.session({"speed-limit-down": 20*1000})
+    }else{
+        console.log("Full speed ahead")
+        await transmission.session({"speed-limit-down": 50*1000})
+    }
+}
+
+manageTorrents()
+manageSpeed()

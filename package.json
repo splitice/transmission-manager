@@ -9,6 +9,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "diskusage": "^1.0.0",
     "fs-extra": "^7.0.1",
     "readdir-recursive-promise": "0.0.1",
     "transmission-promise": "^1.1.2"
