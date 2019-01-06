@@ -92,8 +92,22 @@ async function handleTorrent(torrent){
     }
 }
 
+async function getDownloadedToday(){
+    const now = new Date()
+    const date = now.getFullYear()+'-'+now.getMonth()+'-'+now.getDate()
+    try {
+        const kb = parseFloat(await fsPromises.readFile("/var/uploaddb/"+date+".kbytes"))
+    }catch(ex){
+        return 0
+    }
+    return kb
+}
+
 async function manageSpeed(){
     const gb = 1000*1000*1000;
+
+    const downloaded = await getDownloadedToday()
+
     const info = await disk.check('/');
     if(info.available < 4*gb){
         console.log("Less than 4GB remains (critical)")
@@ -101,12 +115,18 @@ async function manageSpeed(){
     } else if(info.available < 6*gb){
         console.log("Less than 6GB remains (critical)")
         await transmission.session({"speed-limit-down": 100})
+    } else if(downloaded > 725 * 1000 * 1000){
+        console.log("Uploaded more than 725GB (criticial)")
+        await transmission.session({"speed-limit-down": 600})
     } else if(info.available < 10*gb){
         console.log("Less than 10GB remains (critical)")
         await transmission.session({"speed-limit-down": 5*1000})
     }else if(info.available < 20*gb){
         console.log("Less than 20GB remains (warning)")
         await transmission.session({"speed-limit-down": 10*1000})
+    } else if(downloaded > 600 * 1000 * 1000){
+        console.log("Uploaded more than 600GB (warning)")
+        await transmission.session({"speed-limit-down": 15*1000})
     }else if(info.available < 30*gb){
         console.log("Less than 30GB remains (warning)")
         await transmission.session({"speed-limit-down": 20*1000})
