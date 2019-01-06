@@ -8,14 +8,14 @@ const Transmission = require ('transmission-promise'),
 const downloadDir = "/mnt/temp/downloads/torrents/"
 const transmission = new Transmission({host: '205.185.127.66'}) //,username: 'username',password: 'password'
 
-async function manageTorrents(){
+async function manageTorrents(critical){
     try {
-        const arg = await transmission.get(false, ["id","name","status","files","secondsSeeding","isPrivate"]);
+        const arg = await transmission.get(false, ["id","name","status","files","secondsSeeding","isPrivate","percentDone"]);
         const torrents = arg.torrents
         for(let i = 0; i < torrents.length; i++){
             const torrent = torrents[i]
             try {
-                await handleTorrent(torrent)
+                await handleTorrent(torrent, critical)
             }catch(ex){
                 console.error("Unable to handle %s", ex)
             }
@@ -61,7 +61,7 @@ function findExtra(d, torrentFiles, root = ""){
     return toDelete
 }
 
-async function handleTorrent(torrent){
+async function handleTorrent(torrent, critical){
     /* Removal on seeding completion */
     if(torrent.isPrivate){
         if(isSeeding(torrent.status) && torrent.secondsSeeding > 1451520){
@@ -90,6 +90,15 @@ async function handleTorrent(torrent){
             }
         }
     }
+
+    /* Pause >90% if critical */
+    if(critical){
+        if(torrent.status == transmission.status.DOWNLOAD && torrent.percentDone > 0.85){
+            await transmission.stop([torrent.id])
+        }
+    } else if(torrent.status == transmission.status.STOPPED) {
+        await transmission.start([torrent.id])
+    }
 }
 
 async function getDownloadedToday(){
@@ -103,24 +112,26 @@ async function getDownloadedToday(){
     return kb
 }
 
-async function manageSpeed(){
+async function manageSpeed(downloaded, info){
     const gb = 1000*1000*1000;
 
-    const downloaded = await getDownloadedToday()
-
-    const info = await disk.check('/');
+    /* Adjust global speeds */
     if(info.available < 4*gb){
         console.log("Less than 4GB remains (critical)")
         await transmission.session({"speed-limit-down": 5})
+        return true
     } else if(info.available < 6*gb){
         console.log("Less than 6GB remains (critical)")
         await transmission.session({"speed-limit-down": 100})
+        return true
     } else if(downloaded > 725 * 1000 * 1000){
         console.log("Uploaded more than 725GB (criticial)")
         await transmission.session({"speed-limit-down": 600})
+        return true
     } else if(info.available < 10*gb){
         console.log("Less than 10GB remains (critical)")
-        await transmission.session({"speed-limit-down": 5*1000})
+        await transmission.session({"speed-limit-down": 3*1000})
+        return true
     }else if(info.available < 20*gb){
         console.log("Less than 20GB remains (warning)")
         await transmission.session({"speed-limit-down": 10*1000})
@@ -136,5 +147,11 @@ async function manageSpeed(){
     }
 }
 
-manageTorrents()
-manageSpeed()
+async function doMain(){
+    const downloaded = await getDownloadedToday()
+    const info = await disk.check('/');
+    const critical = await manageSpeed(downloaded, info)
+    await manageTorrents(critical)
+}
+
+doMain()
