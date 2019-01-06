@@ -1,0 +1,16 @@
+{
+  "name": "transmission-manager",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "fs-extra": "^7.0.1",
+    "readdir-recursive-promise": "0.0.1",
+    "transmission-promise": "^1.1.2"
+  }
+}
