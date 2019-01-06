@@ -118,15 +118,15 @@ async function getDownloadedToday(){
     return kb
 }
 
-async function manageSpeed(downloaded, info){
+async function manageSpeed(downloaded, info, infoDownload){
     const gb = 1000*1000*1000;
 
     /* Adjust global speeds */
-    if(info.available < 4*gb){
+    if(info.available < 4*gb || infoDownload.available < 10*gb){
         console.log("Less than 4GB remains (critical)")
         await transmission.session({"speed-limit-down": 5})
         return true
-    } else if(info.available < 6*gb){
+    } else if(info.available < 6*gb || infoDownload.available < 25*gb){
         console.log("Less than 6GB remains (critical)")
         await transmission.session({"speed-limit-down": 100})
         return true
@@ -134,7 +134,7 @@ async function manageSpeed(downloaded, info){
         console.log("Uploaded more than 725GB (criticial)")
         await transmission.session({"speed-limit-down": 600})
         return true
-    } else if(info.available < 10*gb){
+    } else if(info.available < 10*gb || infoDownload.available < 50*gb){
         console.log("Less than 10GB remains (critical)")
         await transmission.session({"speed-limit-down": 3*1000})
         return true
@@ -144,7 +144,7 @@ async function manageSpeed(downloaded, info){
     } else if(downloaded > 600 * 1000 * 1000){
         console.log("Uploaded more than 600GB (warning)")
         await transmission.session({"speed-limit-down": 15*1000})
-    }else if(info.available < 30*gb){
+    }else if(info.available < 30*gb || infoDownload.available < 150*gb){
         console.log("Less than 30GB remains (warning)")
         await transmission.session({"speed-limit-down": 20*1000})
     }else{
@@ -165,8 +165,9 @@ async function checkDeleted(torrentFiles){
 
 async function doMain(){
     const downloaded = await getDownloadedToday()
-    const info = await disk.check('/');
-    const critical = await manageSpeed(downloaded, info)
+    const infoRoot = await disk.check('/');
+    const infoDownload = await disk.check(downloadDir);
+    const critical = await manageSpeed(downloaded, infoRoot, infoDownload)
     const files = await manageTorrents(critical)
     await checkDeleted(files)
 }
