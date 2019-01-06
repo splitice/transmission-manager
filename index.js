@@ -9,6 +9,7 @@ const downloadDir = "/mnt/temp/downloads/torrents/"
 const transmission = new Transmission({host: '205.185.127.66'}) //,username: 'username',password: 'password'
 
 async function manageTorrents(critical){
+    const ret = {}
     try {
         const arg = await transmission.get(false, ["id","name","status","files","secondsSeeding","isPrivate","percentDone"]);
         const torrents = arg.torrents
@@ -19,10 +20,15 @@ async function manageTorrents(critical){
             }catch(ex){
                 console.error("Unable to handle %s", ex)
             }
+            for(var f in torrent.files){
+                const topPath = torrent.files[f].name.match(/^([^/]+)/)[1]
+                ret[topPath] = true
+            }
        }
     }finally {
         //setTimeout(doWork, 6000)
     }
+    return ret
 }
 
 function isSeeding(state){
@@ -83,7 +89,7 @@ async function handleTorrent(torrent, critical){
         const d = await rdr.readdirAsync(path)
         if(d){
             const extraFiles = findExtra(d, torrent.files, torrent.name + "/")
-            for(var i = 0; i < extraFiles.length; i++){
+            for(let i = 0; i < extraFiles.length; i++){
                 const file = downloadDir + extraFiles[i]
                 console.log("Removing file %s from %s", file, torrent.name)
                 fsExtra.removeSync(file)
@@ -96,8 +102,8 @@ async function handleTorrent(torrent, critical){
         if(torrent.status == transmission.status.DOWNLOAD && torrent.percentDone > 0.85){
             await transmission.stop([torrent.id])
         }
-    } else if(torrent.status == transmission.status.STOPPED) {
-        await transmission.start([torrent.id])
+    } else if(torrent.status == transmission.status.STOPPED && torrent.percentDone > 0.85) {
+        //await transmission.start([torrent.id])
     }
 }
 
@@ -147,11 +153,22 @@ async function manageSpeed(downloaded, info){
     }
 }
 
+async function checkDeleted(torrentFiles){
+    const files = await fsPromises.readdir(downloadDir)
+    for(var i=0;i<files.length;i++){
+        const file = files[i]
+        if(!torrentFiles[file] && file.indexOf(".part") == -1){
+            fsExtra.removeSync(downloadDir + file)
+        }
+    }
+}
+
 async function doMain(){
     const downloaded = await getDownloadedToday()
     const info = await disk.check('/');
     const critical = await manageSpeed(downloaded, info)
-    await manageTorrents(critical)
+    const files = await manageTorrents(critical)
+    await checkDeleted(files)
 }
 
 doMain()
