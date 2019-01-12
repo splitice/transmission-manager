@@ -6,8 +6,8 @@ const Transmission = require ('transmission-promise'),
       disk = require('diskusage')
 
 const downloadDir = "/mnt/temp/downloads/torrents/"
-const transmission = new Transmission({host: '205.185.127.66'}) //,username: 'username',password: 'password'
-const freeleechMode = true
+const transmission = new Transmission(require("./auth.json")) //,username: 'username',password: 'password'
+const freeleechMode = false
 
 async function manageTorrents(critical){
     const ret = {}
@@ -28,6 +28,18 @@ async function manageTorrents(critical){
     }
        
     return ret
+}
+
+async function isNearCompletePaused(){
+    const arg = await transmission.get(false, ["status","percentDone"]);
+    const torrents = arg.torrents
+    for(let i = 0; i < torrents.length; i++){
+        const torrent = torrents[i]
+        if(torrent.status == transmission.status.DOWNLOAD && torrent.percentDone > 0.85){
+            return false
+        }
+    }
+    return true
 }
 
 function isSeeding(state){
@@ -67,10 +79,10 @@ function findExtra(d, torrentFiles, root = ""){
 }
 
 async function handleTorrent(torrent, critical){
-    const shortTime = torrent.name.indexOf("UHD") == -1 ? 1200 : 432000 /* extra time to make sure processed correctly */
+    const shortTime = torrent.name.indexOf("UHD") == -1 ? (45*60) : 432000 /* extra time to make sure processed correctly */
     
     /* Removal on seeding completion */
-    if(torrent.isPrivate && !freeleechMode){
+    if(torrent.isPrivate && !freeleechMode && torrent.name.indexOf("HDTV") == -1){
         if(isSeeding(torrent.status) && torrent.secondsSeeding > 1451520){
             console.log("Removing private torrent %s, seeded enough", torrent.name)
             await transmission.remove([torrent.id], true)
@@ -123,29 +135,39 @@ async function manageSpeed(downloaded, info, infoDownload){
     const gb = 1000*1000*1000;
 
     /* Adjust global speeds */
-    if(info.available < 4*gb || infoDownload.available < 10*gb){
-        console.log("Less than 4GB remains (critical)")
+    if(infoDownload.available < 10*gb){
+        console.log("Less than 10GB on download drive (critical)")
         await transmission.session({"speed-limit-down": 5})
-        return true
-    } else if(info.available < 6*gb || infoDownload.available < 25*gb){
+        return info.available < 4*gb
+    }
+    else if(info.available < 4*gb){
+        if(await isNearCompletePaused()){
+            console.log("Less than 4GB remains (critical) but paused")
+            await transmission.session({"speed-limit-down": 5000})
+        }else{
+            console.log("Less than 4GB remains (critical)")
+            await transmission.session({"speed-limit-down": 5})
+        }
+        return info.available < 4*gb
+    } else if(info.available < 6*gb || infoDownload.available < 15*gb){
         console.log("Less than 6GB remains (critical)")
         await transmission.session({"speed-limit-down": 100})
-        return true
+        return info.available < 6*gb
     } else if(downloaded > 725 * 1000 * 1000){
         console.log("Uploaded more than 725GB (criticial)")
         await transmission.session({"speed-limit-down": 600})
         return true
-    } else if(info.available < 10*gb || infoDownload.available < 50*gb){
+    } else if(info.available < 10*gb || infoDownload.available < 30*gb){
         console.log("Less than 10GB remains (critical)")
         await transmission.session({"speed-limit-down": 3*1000})
-        return true
+        return info.available < 10*gb
     }else if(info.available < 20*gb){
         console.log("Less than 20GB remains (warning)")
         await transmission.session({"speed-limit-down": 10*1000})
     } else if(downloaded > 600 * 1000 * 1000){
         console.log("Uploaded more than 600GB (warning)")
         await transmission.session({"speed-limit-down": 15*1000})
-    }else if(info.available < 30*gb || infoDownload.available < 150*gb){
+    }else if(info.available < 30*gb || infoDownload.available < 60*gb){
         console.log("Less than 30GB remains (warning)")
         await transmission.session({"speed-limit-down": 20*1000})
     }else{
