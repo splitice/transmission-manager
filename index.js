@@ -82,7 +82,7 @@ async function handleTorrent(torrent, critical){
     const shortTime = torrent.name.indexOf("UHD") == -1 ? (45*60) : 432000 /* extra time to make sure processed correctly */
     
     /* Removal on seeding completion */
-    if(torrent.isPrivate && !freeleechMode && torrent.name.indexOf("HDTV") == -1){
+    if(torrent.isPrivate && !freeleechMode){// && torrent.name.indexOf("HDTV") == -1
         if(isSeeding(torrent.status) && torrent.secondsSeeding > 1451520){
             console.log("Removing private torrent %s, seeded enough", torrent.name)
             await transmission.remove([torrent.id], true)
@@ -178,9 +178,9 @@ async function manageSpeed(downloaded, info, infoDownload){
 
 async function checkDeleted(torrentFiles){
     const files = await fsPromises.readdir(downloadDir)
-    for(var i=0;i<files.length;i++){
-        const file = files[i]
-        if(!torrentFiles[file] && file.indexOf(".part") == -1){
+    for(var file of files) {
+        let torrentFile = file.includes(".part") ? file.substr(0,-5) : file
+        if(!torrentFiles[torrentFile]){
             fsExtra.removeSync(downloadDir + file)
         }
     }
