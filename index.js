@@ -38,7 +38,7 @@ async function isNearCompletePaused(arg){
     const torrents = arg.torrents
     for(let i = 0; i < torrents.length; i++){
         const torrent = torrents[i]
-        if(torrent.status == transmission.status.DOWNLOAD && torrent.percentDone > 0.85){
+        if(torrent.status == transmission.status.DOWNLOAD && torrent.percentDone >= 0.9){
             return false
         }
     }
@@ -115,10 +115,10 @@ async function handleTorrent(torrent, critical){
 
     /* Pause >90% if critical */
     if(critical){
-        if(torrent.status == transmission.status.DOWNLOAD && torrent.percentDone > 0.85){
+        if(torrent.status == transmission.status.DOWNLOAD && torrent.percentDone >= 0.9){
             await transmission.stop([torrent.id])
         }
-    } else if(torrent.status == transmission.status.STOPPED && torrent.percentDone > 0.85) {
+    } else if(torrent.status == transmission.status.STOPPED && torrent.percentDone >= 0.9) {
         await transmission.start([torrent.id])
     }
 }
@@ -184,8 +184,9 @@ async function checkDeleted(torrentFiles){
     for(var file of files) {
         if(file.endsWith(".sum")) continue
         let torrentFile = file.endsWith(".part") ? file.substr(0,file.length-5) : file
-        if(!torrentFiles[torrentFile]){
-            fsExtra.removeSync(downloadDir + file)
+        if(torrentFiles[torrentFile] === undefined){
+            console.log("checkDeleted: Deleting %s", downloadDir + file)
+            //fsExtra.removeSync(downloadDir + file)
         }
     }
 }
@@ -214,11 +215,15 @@ async function processFile(fullPath, hashes){
     if(fullPath.endsWith(".avi") || fullPath.endsWith(".mkv") || fullPath.endsWith(".mp4")){
         const sum = await getPartialSum(fullPath)
         if(hashes[sum]){
-            const stat = fs.lstatSync(fullPath)
-            if(!stat || !stat.isFile()){
-                return
+            try {
+                const stat = fs.lstatSync(fullPath)
+                if(!stat || !stat.isFile()){
+                    return
+                }
+                await forceSymlink(fullPath, hashes[sum])
+            } catch(ex){
+                console.log("symlinkSearch:processFile error: %s", ex)
             }
-            await forceSymlink(fullPath, hashes[sum])
         }
     }
 }
@@ -233,16 +238,20 @@ async function symlinkSearch(torrentFiles){
     }
     for(var file in torrentFiles){
         if(isSeeding(torrentFiles[file])){
-            const fullPath = downloadDir + file
-            const stat = fs.lstatSync(fullPath)
-            if(stat.isDirectory()){
-                const d2 = await rdr.readdirAsync(fullPath)
-                for(var file2 of d2.files){
-                    await processFile(fullPath + "/" + file2.name, hashes)
-                    /* TODO recursive .files on directires */
+            try {
+                const fullPath = downloadDir + file
+                const stat = fs.lstatSync(fullPath)
+                if(stat.isDirectory()){
+                    const d2 = await rdr.readdirAsync(fullPath)
+                    for(var file2 of d2.files){
+                        await processFile(fullPath + "/" + file2.name, hashes)
+                        /* TODO recursive .files on directires */
+                    }
+                } else if (stat.isFile()) {
+                    await processFile(fullPath, hashes)
                 }
-            } else if (stat.isFile()) {
-                await processFile(fullPath, hashes)
+            } catch(ex){
+                console.log("symlinkSearch error: %s", ex)
             }
         }
     }
