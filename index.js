@@ -186,7 +186,7 @@ async function checkDeleted(torrentFiles){
         let torrentFile = file.endsWith(".part") ? file.substr(0,file.length-5) : file
         if(torrentFiles[torrentFile] === undefined){
             console.log("checkDeleted: Deleting %s", downloadDir + file)
-            //fsExtra.removeSync(downloadDir + file)
+            fsExtra.removeSync(downloadDir + file)
         }
     }
 }
