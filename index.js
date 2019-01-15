@@ -3,16 +3,20 @@ const Transmission = require ('transmission-promise'),
       fsPromises = fs.promises,
       rdr = require('readdir-recursive-promise'),
       fsExtra = require('fs-extra'),
-      disk = require('diskusage')
+      disk = require('diskusage'),
+      util = require('util'),
+      shellescape = require('shell-escape');
 
 const downloadDir = "/mnt/temp/downloads/torrents/"
 const transmission = new Transmission(require("./auth.json")) //,username: 'username',password: 'password'
 const freeleechMode = false
 
-async function manageTorrents(critical){
+const exec = util.promisify(require('child_process').exec);
+const glob = util.promisify(require('glob'));
+
+async function manageTorrents(arg, critical){
     const ret = {}
     
-    const arg = await transmission.get(false, ["id","name","status","files","secondsSeeding","isPrivate","percentDone"]);
     const torrents = arg.torrents
     for(let i = 0; i < torrents.length; i++){
         const torrent = torrents[i]
@@ -23,15 +27,14 @@ async function manageTorrents(critical){
         }
         for(var f in torrent.files){
             const topPath = torrent.files[f].name.match(/^([^/]+)/)[1]
-            ret[topPath] = true
+            ret[topPath] = torrent.status
         }
     }
        
     return ret
 }
 
-async function isNearCompletePaused(){
-    const arg = await transmission.get(false, ["status","percentDone"]);
+async function isNearCompletePaused(arg){
     const torrents = arg.torrents
     for(let i = 0; i < torrents.length; i++){
         const torrent = torrents[i]
@@ -68,7 +71,7 @@ function findExtra(d, torrentFiles, root = ""){
             }else {
                 toDelete.push(path)
             }
-        }else{
+        }else if(!file.name.endsWith(".sum")){
             path = root + file.name
             if(!containsFile(torrentFiles, path)){
                 toDelete.push(path)
@@ -131,7 +134,7 @@ async function getDownloadedToday(){
     return kb
 }
 
-async function manageSpeed(downloaded, info, infoDownload){
+async function manageSpeed(arg, downloaded, info, infoDownload){
     const gb = 1000*1000*1000;
 
     /* Adjust global speeds */
@@ -141,7 +144,7 @@ async function manageSpeed(downloaded, info, infoDownload){
         return info.available < 4*gb
     }
     else if(info.available < 4*gb){
-        if(await isNearCompletePaused()){
+        if(await isNearCompletePaused(arg)){
             console.log("Less than 4GB remains (critical) but paused")
             await transmission.session({"speed-limit-down": 5000})
         }else{
@@ -179,9 +182,68 @@ async function manageSpeed(downloaded, info, infoDownload){
 async function checkDeleted(torrentFiles){
     const files = await fsPromises.readdir(downloadDir)
     for(var file of files) {
-        let torrentFile = file.includes(".part") ? file.substr(0,-5) : file
+        if(file.endsWith(".sum")) continue
+        let torrentFile = file.endsWith(".part") ? file.substr(0,file.length-5) : file
         if(!torrentFiles[torrentFile]){
             fsExtra.removeSync(downloadDir + file)
+        }
+    }
+}
+
+async function getPartialSum(file){
+    try {
+        return (await fsPromises.readFile(file + ".sum")).toString().trim()
+    } catch {
+
+    }
+    const command = "head -c 128M "+shellescape([file])+" | md5sum | awk '{print $1}'"
+    const { stdout, stderr } = await exec(command);
+    const str = stdout.toString().trim()
+    await fsPromises.writeFile(file + ".sum", str)
+    return str
+}
+
+async function forceSymlink(from, to){
+    try {
+        fs.unlinkSync(from)
+    }catch{}
+    await fsPromises.symlink(to, from)
+}
+
+async function processFile(fullPath, hashes){
+    if(fullPath.endsWith(".avi") || fullPath.endsWith(".mkv") || fullPath.endsWith(".mp4")){
+        const sum = await getPartialSum(fullPath)
+        if(hashes[sum]){
+            const stat = fs.lstatSync(fullPath)
+            if(!stat || !stat.isFile()){
+                return
+            }
+            await forceSymlink(fullPath, hashes[sum])
+        }
+    }
+}
+
+async function symlinkSearch(torrentFiles){
+    const d = await glob("/mnt/Media/**/*.sum")
+    const hashes = {}
+    for(let file of d){
+        const mainPath = file.substr(0, file.length-4)
+        const hash = await fsPromises.readFile(file)
+        hashes[hash.toString().trim()] = mainPath
+    }
+    for(var file in torrentFiles){
+        if(isSeeding(torrentFiles[file])){
+            const fullPath = downloadDir + file
+            const stat = fs.lstatSync(fullPath)
+            if(stat.isDirectory()){
+                const d2 = await rdr.readdirAsync(fullPath)
+                for(var file2 of d2.files){
+                    await processFile(fullPath + "/" + file2.name, hashes)
+                    /* TODO recursive .files on directires */
+                }
+            } else if (stat.isFile()) {
+                await processFile(fullPath, hashes)
+            }
         }
     }
 }
@@ -190,9 +252,11 @@ async function doMain(){
     const downloaded = await getDownloadedToday()
     const infoRoot = await disk.check('/');
     const infoDownload = await disk.check(downloadDir);
-    const critical = await manageSpeed(downloaded, infoRoot, infoDownload)
-    const files = await manageTorrents(critical)
+    const arg = await transmission.get(false, ["id","name","status","files","secondsSeeding","isPrivate","percentDone"]);
+    const critical = await manageSpeed(arg, downloaded, infoRoot, infoDownload)
+    const files = await manageTorrents(arg, critical)
     await checkDeleted(files)
+    await symlinkSearch(files)
 }
 
 doMain()
