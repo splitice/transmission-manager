@@ -11,6 +11,11 @@ const downloadDir = "/mnt/temp/downloads/torrents/"
 const transmission = new Transmission(require("./auth.json")) //,username: 'username',password: 'password'
 const freeleechMode = false
 
+const getModifiedAgo = (path) => {
+    const stats = fs.statSync(path)
+    return (Date.now() - stats.mtime.valueOf())/1000
+  }
+
 const exec = util.promisify(require('child_process').exec);
 const glob = util.promisify(require('glob'));
 
@@ -82,17 +87,17 @@ function findExtra(d, torrentFiles, root = ""){
 }
 
 async function handleTorrent(torrent, critical){
-    const shortTime = torrent.name.indexOf("UHD") == -1 ? (45*60) : 432000 /* extra time to make sure processed correctly */
+    const shortTime = torrent.name.indexOf("UHD") == -1 ? 1200 : (45*60) /* extra time to make sure processed correctly */
     
     /* Removal on seeding completion */
     if(torrent.isPrivate && !freeleechMode){// && torrent.name.indexOf("HDTV") == -1
-        if(isSeeding(torrent.status) && torrent.secondsSeeding > 1451520){
+        if(isSeeding(torrent.status) && (torrent.secondsSeeding > 1451520 || getModifiedAgo(downloadDir+torrent.name) > 1851520)){
             console.log("Removing private torrent %s, seeded enough", torrent.name)
             await transmission.remove([torrent.id], true)
             return
         }
     }else{
-        if(isSeeding(torrent.status) && torrent.secondsSeeding > 1200){
+        if(isSeeding(torrent.status) && torrent.secondsSeeding > shortTime){
             console.log("Removing %s torrent %s, seeded enough", torrent.isPrivate ? 'private':'public',torrent.name)
             await transmission.remove([torrent.id], true)
             return
@@ -265,7 +270,7 @@ async function doMain(){
     const critical = await manageSpeed(arg, downloaded, infoRoot, infoDownload)
     const files = await manageTorrents(arg, critical)
     await checkDeleted(files)
-    await symlinkSearch(files)
+   //await symlinkSearch(files)
 }
 
 doMain()
